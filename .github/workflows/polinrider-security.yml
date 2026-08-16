@@ -1,0 +1,21 @@
+name: PolinRider security scan
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan worktree and reachable history
+        run: node scripts/security/scan-polinrider.mjs --history
