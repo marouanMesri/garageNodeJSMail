@@ -1,0 +1,133 @@
+name: Security
+
+# Runs the BASE workflow. PR objects are fetched as DATA, never checked out.
+# Do not add a PR build, package install, local action, cache, or artifact execution.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write # Only the trusted publisher writes two explicit HEAD contexts.
+
+concurrency:
+  group: security-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guardrails:
+    name: guardrails
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GIT_CONFIG_NOSYSTEM: "1"
+      GIT_CONFIG_GLOBAL: /dev/null
+      GIT_NO_REPLACE_OBJECTS: "1"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - name: Read trusted base only
+        # Official actions/checkout v4.2.2, full SHA verified in UPSTREAM.txt.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+          lfs: false
+          path: trusted
+
+      - name: Mark exact PR head pending and validate default-branch target
+        env:
+          STATUS_TOKEN: ${{ github.token }}
+        run: >
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/status_report.py"
+          --repository "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --head "$HEAD_SHA" --base "$BASE_SHA"
+          --phase pending
+
+      - name: Fetch PR objects without checking out PR files
+        shell: bash
+        working-directory: trusted
+        env:
+          FETCH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          auth=$(printf 'x-access-token:%s' "$FETCH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -c core.hooksPath=/dev/null -c "http.extraheader=AUTHORIZATION: basic $auth" \
+            fetch --no-tags --no-recurse-submodules origin \
+            "+refs/pull/$PR_NUMBER/head:refs/security/pr-head"
+          unset auth FETCH_TOKEN
+          test "$(git rev-parse refs/security/pr-head)" = "$HEAD_SHA"
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+
+      - name: Test trusted scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/test_scan_payloads.py"
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/test_review_gate.py"
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/test_status_report.py"
+
+      - name: Scan current tree and PR commit snapshots
+        id: payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/security-snapshot"
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/scan_payloads.py" \
+            --repo "$GITHUB_WORKSPACE/trusted" --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --protect-controls --export-head "$RUNNER_TEMP/security-snapshot/files" \
+            --secret-input "$RUNNER_TEMP/security-snapshot/all-text.txt"
+
+      - name: Install verified Gitleaks binary
+        if: ${{ !cancelled() && steps.payloads.outcome != 'skipped' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/security-tools"
+          cd "$RUNNER_TEMP/security-tools"
+          curl --fail --silent --show-error --location --retry 3 \
+            --proto '=https' --tlsv1.2 \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            -o gitleaks.tar.gz
+          printf '%s  %s\n' \
+            551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb \
+            gitleaks.tar.gz | sha256sum --check --strict
+          tar -xzf gitleaks.tar.gz --no-same-owner gitleaks
+          chmod 700 gitleaks
+
+      - name: Verify Gitleaks isolation with trusted synthetic fixtures
+        if: ${{ !cancelled() && steps.payloads.outcome != 'skipped' }}
+        shell: bash
+        env:
+          GITLEAKS_TEST_BIN: ${{ runner.temp }}/security-tools/gitleaks
+        run: |
+          set -euo pipefail
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/test_gitleaks.py"
+
+      - name: Scan every exported text blob through stdin, including intermediate commits
+        if: ${{ !cancelled() && steps.payloads.outcome != 'skipped' }}
+        run: >
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/scan_secrets.py"
+          --binary "$RUNNER_TEMP/security-tools/gitleaks"
+          --input "$RUNNER_TEMP/security-snapshot/all-text.txt"
+
+      - name: Publish payload result on the PR head and refresh current reviews
+        if: ${{ always() }}
+        env:
+          STATUS_TOKEN: ${{ github.token }}
+          SCAN_RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/status_report.py" \
+            --repository "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --head "$HEAD_SHA" --base "$BASE_SHA" \
+            --phase final --result "$SCAN_RESULT"
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/status_report.py" \
+            --repository "$GITHUB_REPOSITORY" --refresh

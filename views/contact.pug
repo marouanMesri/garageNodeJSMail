@@ -1,0 +1,18 @@
+extends layout
+
+block content
+ .container
+  h1.mt-5 Contact
+  br
+  p.lead
+  form(method='post', action='contact/send')
+   .form-group 
+    label Name 
+    input.form-control(type='text',name='name',placeholder='Enter name')
+   .form-group 
+    label Email 
+    input.form-control(type='email',name='email',placeholder='Enter email')
+   .form-group 
+    label Message 
+    textarea.form-control(name='message',placeholder='Enter Message')
+   button.btn.btn-primary(type='submit') Envoyer

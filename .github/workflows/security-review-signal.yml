@@ -1,0 +1,12 @@
+name: Security review signal
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+permissions: {}
+jobs:
+  signal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      # No checkout, actions, secrets, artifacts, PR text or writable token.
+      - run: echo "Review event received; the default-branch workflow re-reads GitHub metadata."

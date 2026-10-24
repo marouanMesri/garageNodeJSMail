@@ -1,0 +1,11 @@
+Verified 2026-10-24 via official repositories.
+checkout v4.2.2: https://github.com/actions/checkout/commit/11bd71901bbe5b1630ceea73d27597364c9af683
+Gitleaks release: https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1
+Linux x64 archive SHA256 (official release asset digest): 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+Config: https://raw.githubusercontent.com/gitleaks/gitleaks/v8.30.1/config/gitleaks.toml
+Original config SHA256: e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf
+Local adaptation: replace global allowlist with .git-only path exclusion. Provider-specific rule allowlists remain upstream; no PR configuration is loaded.
+Local integration test archive (macOS arm64) SHA256: b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5
+Official license: https://raw.githubusercontent.com/gitleaks/gitleaks/v8.30.1/LICENSE
+
+Review adaptation: short-lived Bedrock literal regex wraps its suffix in a noncapturing group. Same matched language; avoids configuration self-alert in stdin scans. Verified by inert marker test. No config-file exclusion added.

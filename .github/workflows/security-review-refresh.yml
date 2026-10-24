@@ -1,0 +1,34 @@
+name: Security review refresh
+on:
+  workflow_run:
+    workflows: [Security review signal]
+    types: [requested, completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  statuses: write
+concurrency:
+  group: security-review-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Read default-branch controls only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+          path: trusted
+      - name: Validate relay metadata and refresh reviews through the API
+        env:
+          STATUS_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 -I -B "$GITHUB_WORKSPACE/trusted/.github/security/status_report.py" \
+            --repository "$GITHUB_REPOSITORY" --refresh --event "$GITHUB_EVENT_PATH"
